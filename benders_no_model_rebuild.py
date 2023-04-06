@@ -25,23 +25,28 @@ print("b: {} with length {}".format(b, len(b)))
 print("##########################\n")
 
 
-def solve_masterproblem(feasibility_cuts, optimality_cuts, iteration):
-    print("\n\n### Solving Masterproblem ###")
+def create_masterproblem():
+    print("\n\n### Creating Masterproblem ###")
     model = Model("MasterProblem")
     y = model.addVar(vtype=GRB.INTEGER, lb=0)
     z = model.addVar(vtype=GRB.CONTINUOUS)
     model.setObjective(z, GRB.MAXIMIZE)
+    return model, z, y
 
-    for shadow_prices in feasibility_cuts:
-        model.addConstr(quicksum((b[i] - B[i] * y) * shadow_prices[i] for i in range(11)) >= 0)
 
-    for shadow_prices in optimality_cuts:
-        model.addConstr(z <= account_returns * y + quicksum((b[i] - B[i] * y) * shadow_prices[i] for i in range(11)))
+def solve_masterproblem(model, z, y, feasibility_cut, optimality_cut, iteration):
+    print("\n\n### Solving Masterproblem ###")
+
+    if feasibility_cut:
+        model.addConstr(quicksum((b[i] - B[i] * y) * feasibility_cut[i] for i in range(11)) >= 0)
+
+    if optimality_cut:
+        model.addConstr(z <= account_returns * y + quicksum((b[i] - B[i] * y) * optimality_cut[i] for i in range(11)))
 
     model.update()
     model.optimize()
     model.write("master_problem_" + str(iteration) + ".lp")
-    return y.X, model.ObjVal
+    return model, y.X, model.ObjVal
 
 
 def solve_subproblem(y_star):
@@ -60,8 +65,7 @@ def solve_subproblem(y_star):
     return shadow_prices, model.status, model.ObjVal
 
 
-feasibility_cuts = []
-optimality_cuts = []
+model, z, y = create_masterproblem()
 
 while UB - LB > epsilon:
     iteration += 1
@@ -75,21 +79,24 @@ while UB - LB > epsilon:
     print(shadow_prices)
     print("")
 
+    feasibility_cut = None
+    optimality_cut = None
+
     if subproblem_status == 3:
         # subproblem primal infeasible, dual unbounded --> add feasibility cut
-        feasibility_cuts.append(shadow_prices)
+        feasibility_cut = shadow_prices
 
     elif subproblem_status == 2:
         # Careful: LB in example calculated via shadow prices. Does not matter.
         LB = max(LB, account_returns * y_star + obj_value_sp)
-        optimality_cuts.append(shadow_prices)
+        optimality_cut = shadow_prices
 
     else:
         print("problem with undefined subproblem status")
 
     print("\nSolving subproblem with provided y_star of {} results in lower bound: {}".format(y_star, LB))
 
-    y_star, UB = solve_masterproblem(feasibility_cuts, optimality_cuts, iteration)
+    model, y_star, UB = solve_masterproblem(model, z, y, feasibility_cut, optimality_cut, iteration)
 
     print("\nSolved master problem with newly added cuts. New upper bound: {}\n".format(UB))
 
